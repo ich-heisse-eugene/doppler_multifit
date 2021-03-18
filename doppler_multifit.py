@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 
 from sys import argv,exit
 import argparse
 import numpy as np
-from lmfit import minimize, Parameters, report_fit
+from lmfit import minimize, Parameters, fit_report, report_fit
 from scipy.interpolate import splrep, splev
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -109,41 +109,44 @@ def residual(params, vel_obs, obs_prof, obs_err, dv, eps, fwhm):
         comb_prof += prof(vel_obs, a, rv, dv, vsini, eps, fwhm)
     return (obs_prof - interp(vel_obs, vel_obs, comb_prof)) / obs_err**2
 
-def report_prof(params, vel_obs, obs_prof, obs_err, dv, eps, fwhm, file_rep):
+def report_prof(params, vel_obs, obs_prof, obs_err, dv, eps, fwhm, logfile):
     comb_prof = np.zeros(len(vel_obs))
     print("Result\n===============")
-    with open(file_rep, 'w') as fp:
+    with open(logfile, 'w') as fp:
+        fp.write("Results of fitting\n")
         for i in range(len(params.params)//3):
             rv = params.params['radvel'+str(i+1)].value
             a = params.params['amp'+str(i+1)].value
             vsini = params.params['vsini'+str(i+1)].value
             comb_prof += prof(vel_obs, a, rv, dv, vsini, eps, fwhm)
             # print report
-            fp.write(f"Component #{i+1}:\n")
             print(f"Component #{i+1}:")
+            fp.write(f"Component #{i+1}:\n")
             if params.params['radvel'+str(i+1)].stderr is not None \
-                             and params.params['vsini'+str(i+1)].stderr is not None:
+                         and params.params['vsini'+str(i+1)].stderr is not None:
                 print(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s")
-                fp.write(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s\n")
                 print(f"vsin i = {params.params['vsini'+str(i+1)].value:.1f} ± {params.params['vsini'+str(i+1)].stderr:.1f} km/s")
+                fp.write(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s\n")
                 fp.write(f"vsin i = {params.params['vsini'+str(i+1)].value:.1f} ± {params.params['vsini'+str(i+1)].stderr:.1f} km/s\n")
             else:
                 print(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± None km/s")
-                fp.write(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± None km/s\n")
                 print(f"vsin i = {params.params['vsini'+str(i+1)].value:.0f} ± None km/s")
+                fp.write(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± None km/s\n")
                 fp.write(f"vsin i = {params.params['vsini'+str(i+1)].value:.0f} ± None km/s\n")
         if params.redchi is not None:
             print(f"-------\nReduced chisq = {params.redchi:.5f}")
             fp.write(f"-------\nReduced chisq = {params.redchi:.5f}\n")
         else:
-            print("The result is uncertain")
-            fp.write("The result is uncertain\n")
+            print(f"The result is uncertain")
+            fp.write(f"The result is uncertain\n")
         print("====== Full report =======")
+        fp.write("====== Full report =======\n")
         report_fit(params)
-        fp.close()
+        fp.write(fit_report(params))
+    fp.close()
     return comb_prof
 
-def plot_profile(obs_vel, obs_prof, obs_err, obs_fit, file_out):
+def plot_profile(obs_vel, obs_prof, obs_err, obs_fit, plot_file):
     fig = plt.figure(figsize=(6,5), tight_layout=True)
     if len(obs_fit) == 0:
         ax = fig.add_subplot(1,1,1)
@@ -167,7 +170,7 @@ def plot_profile(obs_vel, obs_prof, obs_err, obs_fit, file_out):
         ax_1.set_xlabel(r"Velocity, km\,s$^{-1}$")
         lim = np.max(np.abs(obs_prof-obs_fit))*1.1
         ax_1.set_ylim(-lim, lim)
-        plt.savefig(file_out, dpi=300)
+        plt.savefig(plot_file, dpi=300)
         plt.show()
     return None
 
@@ -200,6 +203,9 @@ if __name__ == "__main__":
     parser.add_argument("--interac", help="Enter initial values of radial velocities interactively", \
                                      action="store_true")
     args = parser.parse_args()
+    infile = args.input
+    logfile = infile + "_fit.log"
+    plotfile = infile + "_fit.pdf"
     # Let's go
     Ncomp = args.ncomp
     if args.resol > 1000:
@@ -207,9 +213,7 @@ if __name__ == "__main__":
     elif args.resol > 0 and args.resol < 1:
         resol = 2.5 * args.resol * c / 5500. # reference wavelength = 5500A
     # Default configuration is a single star
-    file_plot = args.input+'fit.pdf'
-    file_rep = args.input+'fit.report'
-    obs_vel, obs_prof, obs_err = import_data(args.input)
+    obs_vel, obs_prof, obs_err = import_data(infile)
     obs_prof = 1 - obs_prof
     if args.fitRV is not None:
         rv_lim = args.fitRV.split(',')
@@ -244,13 +248,13 @@ if __name__ == "__main__":
     # Minimization
     params = fill_param(args, conf, Ncomp)
     try:
-        out = minimize(residual, params, args=(obs_vel, obs_prof, obs_err, dv, args.eps, resol))
-    except Exception:
-        print("Failed")
+        out = minimize(residual, params, args=(obs_vel, obs_prof, obs_err, dv, args.eps, resol), nan_policy='omit')
+    except Exception as e:
+        print(f"Failed: {e}")
         exit(1)
     else:
-        model_fit = report_prof(out, obs_vel, obs_prof, obs_err, dv, args.eps, resol, file_rep)
+        model_fit = report_prof(out, obs_vel, obs_prof, obs_err, dv, args.eps, resol, logfile)
         vel = np.linspace(obs_vel[0], obs_vel[-1], len(obs_vel)*oversample)
-        plot_profile(vel, 1.-interp(vel, obs_vel, obs_prof), obs_err, 1.-interp(vel, obs_vel, model_fit), file_plot)
+        plot_profile(vel, 1.-interp(vel, obs_vel, obs_prof), obs_err, 1.-interp(vel, obs_vel, model_fit), plotfile)
 
     exit(0)
