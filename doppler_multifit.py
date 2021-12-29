@@ -3,6 +3,7 @@
 from sys import argv,exit
 import argparse
 import numpy as np
+import numpy.ma as ma
 from lmfit import minimize, Parameters, fit_report, report_fit
 from scipy.interpolate import splrep, splev
 import matplotlib.pyplot as plt
@@ -66,12 +67,6 @@ def fill_param(args, conf, ncomp):
                         print(f"Wrong component number {val[x]} in args.{item}")
                     else:
                         conf[int(val[x])-1][item.replace('fix','var')] = False
-            elif len(val) > 1 and len(val) % 2 == 0 and item.find('fit') == -1:
-                for x in range(0, len(val), 2):
-                    if int(val[x]) > ncomp:
-                        print(f"Wrong component number {val[x]} in args.{item}")
-                    else:
-                        conf[int(val[x])-1][item] = float(val[x+1])
     out_params = Parameters()
     for i in range(ncomp):
         out_params.add('radvel'+str(i+1), value=conf[i]['initRV'], min=conf[i]['minRV'], \
@@ -164,11 +159,11 @@ def report_prof(params, vel_obs, obs_prof, obs_err, dv, eps, fwhm, logfile):
     fp.close()
     return comb_prof
 
-def plot_profile(obs_vel, obs_prof, obs_err, obs_fit, plot_file):
+def plot_profile(obs_vel, obs_prof, obs_err, mask, diff, fit_obs, plot_file):
     fig = plt.figure(figsize=(6,5), tight_layout=True)
-    if len(obs_fit) == 0:
+    if len(fit_obs) == 0:
         ax = fig.add_subplot(1,1,1)
-        ax.plot(obs_vel, obs_prof, 'k-', lw=0.7)
+        ax.plot(obs_vel, obs_prof, 'ks', ms=1.)
         plt.errorbar(obs_vel, obs_prof, obs_err, capthick=0, capsize=0, \
                      ecolor='k', elinewidth=0.4, xerr=None, fmt="none")
         ax.set_xlabel(r"Velocity, km\,s$^{-1}$")
@@ -179,14 +174,17 @@ def plot_profile(obs_vel, obs_prof, obs_err, obs_fit, plot_file):
         ax = fig.add_subplot(grid[0])
         # plt.errorbar(obs_vel, obs_prof, obs_err, capthick=0, capsize=0, \
         #              ecolor='k', elinewidth=0.4, xerr=None, fmt="none")
-        ax.plot(obs_vel, obs_prof, 'k-', lw=0.7)
-        ax.plot(obs_vel, obs_fit, 'r-', lw=1.1)
+        ax.plot(obs_vel, obs_prof, 'ks', ms=1.)
+        ax.plot(obs_vel[np.logical_not(mask)], obs_prof[np.logical_not(mask)], 'bx', ms=3.1)
+        ax.plot(obs_vel, fit_obs, 'r-', lw=1.1)
         ax.set_ylabel("Mean LSD")
+        ax.set_xlim(obs_vel[0], obs_vel[-1])
         ax_1 = fig.add_subplot(grid[1])
-        ax_1.plot(obs_vel, obs_prof-obs_fit, 'k-', lw=0.7)
+        ax_1.plot(obs_vel[mask], diff, 'ks', ms=0.7)
         ax_1.set_ylabel("Resid")
         ax_1.set_xlabel(r"Velocity, km\,s$^{-1}$")
-        lim = np.max(np.abs(obs_prof-obs_fit))*1.1
+        lim = np.max(np.abs(diff))*1.1
+        ax_1.set_xlim(obs_vel[0], obs_vel[-1])
         ax_1.set_ylim(-lim, lim)
         plt.savefig(plot_file, dpi=300)
         plt.show()
@@ -217,9 +215,9 @@ if __name__ == "__main__":
                                          n1,n2,...", type=str)
     parser.add_argument("--fixV", help="Fixed value(s) of vsin i for selected components. Format: \
                                          n1,n2,...", type=str)
-    parser.add_argument("--fitRV", help="Range of velocities for fitting. Format: RV1,RV2", type=str)
-    parser.add_argument("--interac", help="Enter initial values of radial velocities interactively", \
-                                     action="store_true")
+    parser.add_argument("--zoomRV", help="Range of velocities for fitting. Format: RV1,RV2", type=str)
+    parser.add_argument("--exclude", help="Regions to exclude in fitting. Format: RV01:RV02,RV11:RV12", \
+                        default="", type=str)
     args = parser.parse_args()
     infile = args.input
     logfile = infile + "_fit.log"
@@ -232,13 +230,16 @@ if __name__ == "__main__":
         resol = 2.5 * args.resol * c / 5500. # reference wavelength = 5500A
     # Default configuration is a single star
     obs_vel, obs_prof, obs_err = import_data(infile)
-    obs_prof = 1 - obs_prof
-    if args.fitRV is not None:
-        rv_lim = args.fitRV.split(',')
+    if args.zoomRV is not None:
+        rv_lim = args.zoomRV.split(',')
         idx = np.where((obs_vel >= float(rv_lim[0])) & (obs_vel <= float(rv_lim[1])))[0]
         obs_vel = obs_vel[idx]
         obs_prof = obs_prof[idx]
         obs_err = obs_err[idx]
+    obs_vel_full = obs_vel.copy()
+    obs_prof_full = obs_prof.copy()
+    obs_err_full = obs_err.copy()
+    obs_prof = 1 - obs_prof
     minRV = obs_vel[0]
     maxRV = obs_vel[-1]
     dv = np.abs(obs_vel[-1] - obs_vel[-2])
@@ -256,12 +257,20 @@ if __name__ == "__main__":
             "varV": True,
         }
         conf.append(conf_single)
-    if args.interac:
-        plot_profile(obs_vel, obs_prof, obs_err, [])
-        for i in range(Ncomp):
-            guess = input(f"Enter expected RV of the component #{i+1} -> ")
-            conf[i]['initRV'] = float(guess)
-        plt.close()
+    # masking data
+    mask = np.ones(len(obs_vel), dtype='bool')
+    if args.exclude != "":
+        regs = args.exclude.split(',')
+        for i in range(len(regs)):
+            if regs[i].find(':') == -1:
+                print(f"Wrong format of the region {regs[i]}. Skipping...")
+            else:
+                rvi1,rvi2 = regs[i].split(':')
+                idx = np.where((obs_vel >= float(rvi1)) & (obs_vel <= float(rvi2)))
+                mask[idx] = False
+        obs_vel = obs_vel[mask]
+        obs_prof = obs_prof[mask]
+        obs_err = obs_err[mask]
     # Minimization
     params = fill_param(args, conf, Ncomp)
     try:
@@ -271,7 +280,8 @@ if __name__ == "__main__":
         exit(1)
     else:
         model_fit = report_prof(out, obs_vel, obs_prof, obs_err, dv, args.eps, resol, logfile)
-        vel = np.linspace(obs_vel[0], obs_vel[-1], len(obs_vel)*oversample)
-        plot_profile(vel, 1.-interp(vel, obs_vel, obs_prof), obs_err, 1.-interp(vel, obs_vel, model_fit), plotfile)
+        diff = obs_prof - model_fit
+        model_full = 1.-report_prof(out, obs_vel_full, obs_prof_full, obs_err_full, dv, args.eps, resol, logfile)
+        plot_profile(obs_vel_full, obs_prof_full, obs_err_full, mask, diff, model_full, plotfile)
 
     exit(0)
