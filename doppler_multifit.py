@@ -42,12 +42,24 @@ def fill_param(args, conf, ncomp):
         attr = getattr(args, item)
         if isinstance(attr, str) and attr is not None:
             val = attr.split(',')
-            if item.find('init') != -1:
-                for x in range(0, len(val)):
-                    if not val[x].isnumeric():
-                        print(f"Wrong initial value {val[x]} in args.{item}")
+            if len(val) > 1 and len(val) % 2 == 0 and item.find('init') != -1:
+                for x in range(0, len(val), 2):
+                    if int(val[x]) > ncomp:
+                        print(f"Wrong component number {val[x]} in args.{item}")
                     else:
-                        conf[x][item] = float(val[x])
+                        conf[int(val[x])-1][item] = float(val[x+1])
+            elif len(val) > 1 and len(val) % 2 == 0 and item.find('min') != -1:
+                for x in range(0, len(val), 2):
+                    if int(val[x]) > ncomp:
+                        print(f"Wrong component number {val[x]} in args.{item}")
+                    else:
+                        conf[int(val[x])-1][item] = float(val[x+1])
+            elif len(val) > 1 and len(val) % 2 == 0 and item.find('max') != -1:
+                for x in range(0, len(val), 2):
+                    if int(val[x]) > ncomp:
+                        print(f"Wrong component number {val[x]} in args.{item}")
+                    else:
+                        conf[int(val[x])-1][item] = float(val[x+1])
             elif item.find('fix') != -1:
                 for x in range(0, len(val)):
                     if not val[x].isnumeric() or int(val[x]) > ncomp:
@@ -60,7 +72,6 @@ def fill_param(args, conf, ncomp):
                         print(f"Wrong component number {val[x]} in args.{item}")
                     else:
                         conf[int(val[x])-1][item] = float(val[x+1])
-    print(conf)
     out_params = Parameters()
     for i in range(ncomp):
         out_params.add('radvel'+str(i+1), value=conf[i]['initRV'], min=conf[i]['minRV'], \
