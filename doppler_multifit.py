@@ -110,7 +110,7 @@ def prof(vel, amp, vr, dvel, vsini, eps, fwhm):
     vel_dop, dop = doppler(vel, dvel, vsini, eps)
     gs = gauss(vel_dop, fwhm)
     conv = np.convolve(gs/np.max(gs), dop/np.max(dop), mode='same')
-    prof = interp(vel, vel_dop+vr, conv/np.max(conv))
+    prof = interp(vel, vel_dop+vr, conv)
     return amp * prof
 
 def residual(params, vel_obs, obs_prof, obs_err, dv, eps, fwhm):
@@ -216,12 +216,16 @@ if __name__ == "__main__":
     parser.add_argument("--fixV", help="Fixed value(s) of vsin i for selected components. Format: \
                                          n1,n2,...", type=str)
     parser.add_argument("--zoomRV", help="Range of velocities for fitting. Format: RV1,RV2", type=str)
+    parser.add_argument("--plot", help="Save plot to the output file [with extension]", type=str, default=None)
     parser.add_argument("--exclude", help="Regions to exclude in fitting. Format: RV01:RV02,RV11:RV12", \
                         default="", type=str)
     args = parser.parse_args()
     infile = args.input
     logfile = infile + "_fit.log"
-    plotfile = infile + "_fit.pdf"
+    if args.plot == None:
+        plotfile = infile + "_fit.pdf"
+    else:
+        plotfile = args.plot
     # Let's go
     Ncomp = args.ncomp
     if args.resol > 1000:
