@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/local/bin/python3.11
 
 from sys import argv,exit
 import argparse
@@ -11,7 +11,6 @@ import matplotlib.gridspec as gridspec
 import matplotlib as mpl
 
 # block of constants and initialized variables
-c = 299792.458 # speed of light in km/s
 oversample = 3 # oversampling of the profile
 resol = 17.6 # spectral resolution in km/s [Default is 17.6 km/s => R = 17000, see desc.]
 eps = 0.6     # Limb darkening [Default is 0.6]
@@ -19,6 +18,7 @@ Ncomp = 1     # Number of components [Default is 1]
 minRV = -500  # Minimum RV [Default is -500]
 maxRV = 500   # Maximum RV [Default is 500]
 maxV = 450    # Maximum vsin i [Default is 450]
+c = 299792.458 # speed of light in km/s
 
 fontsize = 12
 
@@ -122,44 +122,48 @@ def residual(params, vel_obs, obs_prof, obs_err, dv, eps, fwhm):
         comb_prof += prof(vel_obs, a, rv, dv, vsini, eps, fwhm)
     return (obs_prof - interp(vel_obs, vel_obs, comb_prof)) / obs_err**2
 
-def report_prof(params, vel_obs, obs_prof, obs_err, dv, eps, fwhm, logfile):
+def make_prof(params, vel_obs, dv, eps, fwhm):
     comb_prof = np.zeros(len(vel_obs))
+    for i in range(len(params.params)//3):
+        rv = params.params['radvel'+str(i+1)].value
+        a = params.params['amp'+str(i+1)].value
+        vsini = params.params['vsini'+str(i+1)].value
+        comb_prof += prof(vel_obs, a, rv, dv, vsini, eps, fwhm)
+    return comb_prof
+
+def report_result(params, args, logfile):
     print("Result\n===============")
-    with open(logfile, 'w') as fp:
-        fp.write("Results of fitting\n")
+    with open(logfile, 'a') as fp:
         for i in range(len(params.params)//3):
-            rv = params.params['radvel'+str(i+1)].value
-            a = params.params['amp'+str(i+1)].value
-            vsini = params.params['vsini'+str(i+1)].value
-            comb_prof += prof(vel_obs, a, rv, dv, vsini, eps, fwhm)
             # print report
-            print(f"Component #{i+1}:")
-            fp.write(f"Component #{i+1}:\n")
             if params.params['radvel'+str(i+1)].stderr is not None \
                          and params.params['vsini'+str(i+1)].stderr is not None:
-                print(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s")
-                print(f"vsin i = {params.params['vsini'+str(i+1)].value:.1f} ± {params.params['vsini'+str(i+1)].stderr:.1f} km/s")
-                fp.write(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s\n")
-                fp.write(f"vsin i = {params.params['vsini'+str(i+1)].value:.1f} ± {params.params['vsini'+str(i+1)].stderr:.1f} km/s\n")
+                print(f"RV{i+1} = {params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s")
+                print(f"v{i+1}sin i = {params.params['vsini'+str(i+1)].value:.1f} ± {params.params['vsini'+str(i+1)].stderr:.1f} km/s")
+                print(f"{params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s\t", end='', file=fp)
+                print(f"{params.params['vsini'+str(i+1)].value:.1f} ± {params.params['vsini'+str(i+1)].stderr:.1f} km/s\t", end='', file=fp)
             else:
                 print(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± None km/s")
                 print(f"vsin i = {params.params['vsini'+str(i+1)].value:.0f} ± None km/s")
-                fp.write(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± None km/s\n")
-                fp.write(f"vsin i = {params.params['vsini'+str(i+1)].value:.0f} ± None km/s\n")
+                print(f"{params.params['radvel'+str(i+1)].value:.1f} ± None km/s\t", end='', file=fp)
+                print(f"{params.params['vsini'+str(i+1)].value:.0f} ± None km/s\t", end='', file=fp)
         if params.redchi is not None:
-            print(f"-------\nReduced chisq = {params.redchi:.5f}")
-            fp.write(f"-------\nReduced chisq = {params.redchi:.5f}\n")
+            print(f"\n-------\nReduced chisq = {params.redchi:.5f}")
+            if not args.batch:
+                print(f"\n-------\nReduced chisq = {params.redchi:.5f}\n", file=fp)
         else:
             print(f"The result is uncertain")
-            fp.write(f"The result is uncertain\n")
+            if not batch_key:
+                print(f"The result is uncertain\n", file=fp)
         print("====== Full report =======")
-        fp.write("====== Full report =======\n")
         report_fit(params)
-        fp.write(fit_report(params))
+        if not args.batch:
+            print("====== Full report =======\n", file=fp)
+            print(fit_report(params), file=fp)
     fp.close()
-    return comb_prof
+    return None
 
-def plot_profile(obs_vel, obs_prof, obs_err, mask, diff, fit_obs, plot_file):
+def plot_profile(obs_vel, obs_prof, obs_err, mask, diff, fit_obs, plot_file, batch_key):
     fig = plt.figure(figsize=(6,5), tight_layout=True)
     if len(fit_obs) == 0:
         ax = fig.add_subplot(1,1,1)
@@ -187,8 +191,78 @@ def plot_profile(obs_vel, obs_prof, obs_err, mask, diff, fit_obs, plot_file):
         ax_1.set_xlim(obs_vel[0], obs_vel[-1])
         ax_1.set_ylim(-lim, lim)
         plt.savefig(plot_file, dpi=300)
-        plt.show()
+        if not batch_key:
+            plt.show()
     return None
+
+def process_file(infile, args, logfile):
+    global c, minV, maxV, minRV, maxRV
+    if args.resol > 1000:
+        resol = c / args.resol
+    elif args.resol > 0 and args.resol < 1:
+        resol = 2.5 * args.resol * c / 5500. # reference wavelength = 5500A
+    obs_vel, obs_prof, obs_err = import_data(infile)
+    if args.plot == None:
+        plotfile = infile + "_fit.pdf"
+    else:
+        plotfile = args.plot
+    if maxV >= np.max(np.abs(obs_vel)): maxV = np.max(np.abs(obs_vel)) - resol
+    if args.zoomRV is not None:
+        rv_lim = args.zoomRV.split(',')
+        idx = np.where((obs_vel >= float(rv_lim[0])) & (obs_vel <= float(rv_lim[1])))[0]
+        obs_vel = obs_vel[idx]
+        obs_prof = obs_prof[idx]
+        obs_err = obs_err[idx]
+    obs_vel_full = obs_vel.copy()
+    obs_prof_full = obs_prof.copy()
+    obs_err_full = obs_err.copy()
+    obs_prof = 1. - obs_prof
+    minRV = obs_vel[0]
+    maxRV = obs_vel[-1]
+    dv = np.abs(obs_vel[-1] - obs_vel[-2])
+    conf = []
+    for cmp in range(args.ncomp):
+        conf_single = {
+            "number": cmp+1,
+            "initRV": 0,
+            "initV": resol,
+            "minRV": minRV,
+            "maxRV": maxRV,
+            "minV": 0.5 * resol,
+            "maxV": maxV,
+            "varRV": True,
+            "varV": True,
+        }
+        conf.append(conf_single)
+    # masking data
+    mask = np.ones(len(obs_vel), dtype='bool')
+    if args.exclude != "":
+        regs = args.exclude.split(',')
+        for i in range(len(regs)):
+            if regs[i].find(':') == -1:
+                print(f"Wrong format of the region {regs[i]}. Skipping...")
+            else:
+                rvi1,rvi2 = regs[i].split(':')
+                idx = np.where((obs_vel >= float(rvi1)) & (obs_vel <= float(rvi2)))
+                mask[idx] = False
+        obs_vel = obs_vel[mask]
+        obs_prof = obs_prof[mask]
+        obs_err = obs_err[mask]
+    # Minimization
+    params = fill_param(args, conf, args.ncomp)
+    try:
+        out = minimize(residual, params, args=(obs_vel, obs_prof, obs_err, dv, args.eps, resol), nan_policy='omit')
+    except Exception as e:
+        print(f"Failed: {e}")
+        return False
+    else:
+        model_fit = make_prof(out, obs_vel, dv, args.eps, resol)
+        diff = obs_prof - model_fit
+        model_full = 1.-make_prof(out, obs_vel_full, dv, args.eps, resol)
+        report_result(out, args, logfile)
+        plot_profile(obs_vel_full, obs_prof_full, obs_err_full, mask, diff, model_full, plotfile, args.batch)
+    return True
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -219,74 +293,38 @@ if __name__ == "__main__":
     parser.add_argument("--plot", help="Save plot to the output file [with extension]", type=str, default=None)
     parser.add_argument("--exclude", help="Regions to exclude in fitting. Format: RV01:RV02,RV11:RV12", \
                         default="", type=str)
+    parser.add_argument("--batch", help="Batch processing. An input file must contain a list of LSD profiles", action="store_true")
+    parser.add_argument("--hastime", help="Batch processin. An input file must contain a column with time marks separated by semicolon from a list of LSD profiles", action="store_true")
     args = parser.parse_args()
     infile = args.input
     logfile = infile + "_fit.log"
-    if args.plot == None:
-        plotfile = infile + "_fit.pdf"
-    else:
-        plotfile = args.plot
     # Let's go
-    Ncomp = args.ncomp
-    if args.resol > 1000:
-        resol = c / args.resol
-    elif args.resol > 0 and args.resol < 1:
-        resol = 2.5 * args.resol * c / 5500. # reference wavelength = 5500A
-    # Default configuration is a single star
-    obs_vel, obs_prof, obs_err = import_data(infile)
-    if maxV >= np.max(np.abs(obs_vel)): maxV = np.max(np.abs(obs_vel)) - resol
-    if args.zoomRV is not None:
-        rv_lim = args.zoomRV.split(',')
-        idx = np.where((obs_vel >= float(rv_lim[0])) & (obs_vel <= float(rv_lim[1])))[0]
-        obs_vel = obs_vel[idx]
-        obs_prof = obs_prof[idx]
-        obs_err = obs_err[idx]
-    obs_vel_full = obs_vel.copy()
-    obs_prof_full = obs_prof.copy()
-    obs_err_full = obs_err.copy()
-    obs_prof = 1 - obs_prof
-    minRV = obs_vel[0]
-    maxRV = obs_vel[-1]
-    dv = np.abs(obs_vel[-1] - obs_vel[-2])
-    conf = []
-    for c in range(Ncomp):
-        conf_single = {
-            "number": c+1,
-            "initRV": 0,
-            "initV": resol,
-            "minRV": minRV,
-            "maxRV": maxRV,
-            "minV": 0.5 * resol,
-            "maxV": maxV,
-            "varRV": True,
-            "varV": True,
-        }
-        conf.append(conf_single)
-    # masking data
-    mask = np.ones(len(obs_vel), dtype='bool')
-    if args.exclude != "":
-        regs = args.exclude.split(',')
-        for i in range(len(regs)):
-            if regs[i].find(':') == -1:
-                print(f"Wrong format of the region {regs[i]}. Skipping...")
-            else:
-                rvi1,rvi2 = regs[i].split(':')
-                idx = np.where((obs_vel >= float(rvi1)) & (obs_vel <= float(rvi2)))
-                mask[idx] = False
-        obs_vel = obs_vel[mask]
-        obs_prof = obs_prof[mask]
-        obs_err = obs_err[mask]
-    # Minimization
-    params = fill_param(args, conf, Ncomp)
-    try:
-        out = minimize(residual, params, args=(obs_vel, obs_prof, obs_err, dv, args.eps, resol), nan_policy='omit')
-    except Exception as e:
-        print(f"Failed: {e}")
-        exit(1)
-    else:
-        model_fit = report_prof(out, obs_vel, obs_prof, obs_err, dv, args.eps, resol, logfile)
-        diff = obs_prof - model_fit
-        model_full = 1.-report_prof(out, obs_vel_full, obs_prof_full, obs_err_full, dv, args.eps, resol, logfile)
-        plot_profile(obs_vel_full, obs_prof_full, obs_err_full, mask, diff, model_full, plotfile)
+    with open(logfile, 'w') as fp:
+        print("# Results of fitting\n# ", file=fp, end='')
+        for i in range(args.ncomp):
+            print(f"RV{i+1} ± sigma\t v{i+1}sin i ± sigma \t", end='', file=fp)
+        print("\n#  ---  ", file=fp)
+    fp.close()
 
+    if args.batch:
+        if args.hastime:
+            tmark, filelist = np.loadtxt(infile, unpack=True, usecols=(0,1), delimiter=';', dtype=str)
+        else:
+            filelist = np.loadtxt(infile, unpack=True, dtype=str)
+        for f in range(len(filelist)):
+            result = process_file(filelist[f], args, logfile)
+            if args.hastime:
+                with open(logfile, 'a') as fp:
+                    print(f"# Filename - time: {filelist[f].rstrip()} - {tmark[f].rstrip()}", file=fp)
+                fp.close()
+            else:
+                with open(logfile, 'a') as fp:
+                    print(f"# Filename: {filelist[f].rstrip()}", file=fp)
+                fp.close()
+            if result:
+                print(f"File {filelist[f]} has been succesfully processed\n")
+    else:
+        result = process_file(infile, args, logfile)
+        if result:
+            print(f"File {infile} has been succesfully processed\n")
     exit(0)
