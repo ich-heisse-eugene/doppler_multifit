@@ -312,7 +312,7 @@ if __name__ == "__main__":
         else:
             filelist = np.loadtxt(infile, unpack=True, dtype=str)
         for f in range(len(filelist)):
-            result = process_file(filelist[f], args, logfile)
+            result = process_file(filelist[f].strip(), args, logfile)
             if args.hastime:
                 with open(logfile, 'a') as fp:
                     print(f"# Filename - time: {filelist[f].strip()} - {tmark[f].strip()}", file=fp)
@@ -322,7 +322,7 @@ if __name__ == "__main__":
                     print(f"# Filename: {filelist[f].strip()}", file=fp)
                 fp.close()
             if result:
-                print(f"File {filelist[f]} has been succesfully processed\n")
+                print(f"File {filelist[f].strip()} has been succesfully processed\n")
     else:
         result = process_file(infile, args, logfile)
         if result:
