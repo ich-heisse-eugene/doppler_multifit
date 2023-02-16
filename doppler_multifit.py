@@ -315,11 +315,11 @@ if __name__ == "__main__":
             result = process_file(filelist[f], args, logfile)
             if args.hastime:
                 with open(logfile, 'a') as fp:
-                    print(f"# Filename - time: {filelist[f].rstrip()} - {tmark[f].rstrip()}", file=fp)
+                    print(f"# Filename - time: {filelist[f].strip()} - {tmark[f].strip()}", file=fp)
                 fp.close()
             else:
                 with open(logfile, 'a') as fp:
-                    print(f"# Filename: {filelist[f].rstrip()}", file=fp)
+                    print(f"# Filename: {filelist[f].strip()}", file=fp)
                 fp.close()
             if result:
                 print(f"File {filelist[f]} has been succesfully processed\n")
