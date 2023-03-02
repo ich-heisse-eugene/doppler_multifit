@@ -195,13 +195,14 @@ def plot_profile(obs_vel, obs_prof, obs_err, mask, diff, fit_obs, plot_file, bat
             plt.show()
     return None
 
-def process_file(infile, args, logfile):
+def process_file(infile, args, logfile, bary):
     global c, minV, maxV, minRV, maxRV
     if args.resol > 1000:
         resol = c / args.resol
     elif args.resol > 0 and args.resol < 1:
         resol = 2.5 * args.resol * c / 5500. # reference wavelength = 5500A
     obs_vel, obs_prof, obs_err = import_data(infile)
+    obs_vel += bary
     if args.plot == None:
         plotfile = infile + "_fit.pdf"
     else:
@@ -295,6 +296,7 @@ if __name__ == "__main__":
                         default="", type=str)
     parser.add_argument("--batch", help="Batch processing. An input file must contain a list of LSD profiles", action="store_true")
     parser.add_argument("--hastime", help="Batch processin. An input file must contain a column with time marks separated by semicolon from a list of LSD profiles", action="store_true")
+    parser.add_argument("--bary", help="An input file contain a column with barycentric correction in km/s", action="store_true")
     args = parser.parse_args()
     infile = args.input
     logfile = infile + "_fit.log"
@@ -308,21 +310,31 @@ if __name__ == "__main__":
 
     if args.batch:
         if args.hastime:
-            tmark, filelist = np.loadtxt(infile, unpack=True, usecols=(0,1), delimiter=';', dtype=str)
+            if args.bary:
+                tmark, filelist, barycor = np.loadtxt(infile, unpack=True, usecols=(0,1,2), delimiter=';', dtype=str)
+            else:
+                tmark, filelist = np.loadtxt(infile, unpack=True, usecols=(0,1), delimiter=';', dtype=str)
         else:
-            filelist = np.loadtxt(infile, unpack=True, dtype=str)
+            if args.bary:
+                filelist, barycor = np.loadtxt(infile, unpack=True, dtype=str, usecols=(0,1), delimiter=';')
+            else:
+                filelist = np.loadtxt(infile, unpack=True, dtype=str)
+        if not args.bary:
+            barycor = np.zeros(len(filelist), dtype=float)
+        else:
+            barycor = np.asarray(barycor, dtype=float)
         for f in range(len(filelist)):
-            result = process_file(filelist[f].strip(), args, logfile)
+            result = process_file(filelist[f].strip(), args, logfile, barycor[f])
             if args.hastime:
                 with open(logfile, 'a') as fp:
-                    print(f"# Filename - time: {filelist[f].strip()} - {tmark[f].strip()}", file=fp)
+                    print(f"# Filename - time (barycor): {filelist[f].strip()} - {tmark[f].strip()} ({barycor[f]:.2f})", file=fp)
                 fp.close()
             else:
                 with open(logfile, 'a') as fp:
                     print(f"# Filename: {filelist[f].strip()}", file=fp)
                 fp.close()
             if result:
-                print(f"File {filelist[f].strip()} has been succesfully processed\n")
+                print(f"File {filelist[f]} has been succesfully processed\n")
     else:
         result = process_file(infile, args, logfile)
         if result:
