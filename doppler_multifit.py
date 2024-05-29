@@ -12,7 +12,7 @@ import matplotlib as mpl
 
 # block of constants and initialized variables
 oversample = 3 # oversampling of the profile
-resol = 17.6 # spectral resolution in km/s [Default is 17.6 km/s => R = 17000, see desc.]
+defresol = 17.6 # spectral resolution in km/s [Default is 17.6 km/s => R = 17000, see desc.]
 eps = 0.6     # Limb darkening [Default is 0.6]
 Ncomp = 1     # Number of components [Default is 1]
 minRV = -500  # Minimum RV [Default is -500]
@@ -136,17 +136,20 @@ def report_result(params, args, logfile):
     with open(logfile, 'a') as fp:
         for i in range(len(params.params)//3):
             # print report
+            if params.redchi is not None:
+                scale = 1 # params.redchi / (params.ndata - params.nvarys)
+#                print(f"Warning: Errors will be multiplied by a scale factor {scale:.4f}")
             if params.params['radvel'+str(i+1)].stderr is not None \
                          and params.params['vsini'+str(i+1)].stderr is not None:
-                print(f"RV{i+1} = {params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s")
-                print(f"v{i+1}sin i = {params.params['vsini'+str(i+1)].value:.1f} ± {params.params['vsini'+str(i+1)].stderr:.1f} km/s")
-                print(f"{params.params['radvel'+str(i+1)].value:.1f} ± {params.params['radvel'+str(i+1)].stderr:.1f} km/s\t", end='', file=fp)
-                print(f"{params.params['vsini'+str(i+1)].value:.1f} ± {params.params['vsini'+str(i+1)].stderr:.1f} km/s\t", end='', file=fp)
+                print(f"RV{i+1} = {params.params['radvel'+str(i+1)].value:.2f} ± {params.params['radvel'+str(i+1)].stderr * scale:.2f} km/s")
+                print(f"v{i+1}sin i = {params.params['vsini'+str(i+1)].value:.2f} ± {params.params['vsini'+str(i+1)].stderr * scale:.2f} km/s")
+                print(f"{params.params['radvel'+str(i+1)].value:.2f} ± {params.params['radvel'+str(i+1)].stderr * scale:.2f} km/s\t", end='', file=fp)
+                print(f"{params.params['vsini'+str(i+1)].value:.2f} ± {params.params['vsini'+str(i+1)].stderr * scale:.2f} km/s\t", end='', file=fp)
             else:
-                print(f"RV = {params.params['radvel'+str(i+1)].value:.1f} ± None km/s")
-                print(f"vsin i = {params.params['vsini'+str(i+1)].value:.0f} ± None km/s")
-                print(f"{params.params['radvel'+str(i+1)].value:.1f} ± None km/s\t", end='', file=fp)
-                print(f"{params.params['vsini'+str(i+1)].value:.0f} ± None km/s\t", end='', file=fp)
+                print(f"RV = {params.params['radvel'+str(i+1)].value:.2f} ± None km/s")
+                print(f"vsin i = {params.params['vsini'+str(i+1)].value:.2f} ± None km/s")
+                print(f"{params.params['radvel'+str(i+1)].value:.2f} ± None km/s\t", end='', file=fp)
+                print(f"{params.params['vsini'+str(i+1)].value:.2f} ± None km/s\t", end='', file=fp)
         if params.redchi is not None:
             print(f"\n-------\nReduced chisq = {params.redchi:.5f}")
             if not args.batch:
@@ -170,8 +173,8 @@ def plot_profile(obs_vel, obs_prof, obs_err, mask, diff, fit_obs, plot_file, bat
         ax.plot(obs_vel, obs_prof, 'ks', ms=1.)
         plt.errorbar(obs_vel, obs_prof, obs_err, capthick=0, capsize=0, \
                      ecolor='k', elinewidth=0.4, xerr=None, fmt="none")
-        ax.set_xlabel(r"Velocity, km\,s$^{-1}$")
-        ax.set_ylabel("Mean LSD")
+        ax.set_xlabel(r"Velocity [km\,s$^{-1}$]")
+        ax.set_ylabel("Mean LSD $I$")
         plt.show(block=False)
     else:
         grid = gridspec.GridSpec(2, 1, figure=fig, height_ratios=[4, 1])
@@ -185,8 +188,8 @@ def plot_profile(obs_vel, obs_prof, obs_err, mask, diff, fit_obs, plot_file, bat
         ax.set_xlim(obs_vel[0], obs_vel[-1])
         ax_1 = fig.add_subplot(grid[1])
         ax_1.plot(obs_vel[mask], diff, 'ks', ms=0.7)
-        ax_1.set_ylabel("Resid")
-        ax_1.set_xlabel(r"Velocity, km\,s$^{-1}$")
+        ax_1.set_ylabel("Resid.")
+        ax_1.set_xlabel(r"Velocity [km\,s$^{-1}$]")
         lim = np.max(np.abs(diff))*1.1
         ax_1.set_xlim(obs_vel[0], obs_vel[-1])
         ax_1.set_ylim(-lim, lim)
@@ -201,6 +204,8 @@ def process_file(infile, args, logfile, bary):
         resol = c / args.resol
     elif args.resol > 0 and args.resol < 1:
         resol = 2.5 * args.resol * c / 5500. # reference wavelength = 5500A
+    else:
+        resol = args.resol
     obs_vel, obs_prof, obs_err = import_data(infile)
     obs_vel += bary
     if args.plot == None:
@@ -271,7 +276,7 @@ if __name__ == "__main__":
     parser.add_argument("--eps", help="Limb-darkening coefficient", type=float, default=eps)
     parser.add_argument("--resol", help="Spectral resolution. Values > 1000 correspond to R, \
                                      values < 1 correspond to dl in A/pix, otherwise it is in km/s", \
-                                     type=float, default=resol)
+                                     type=float, default=defresol)
     parser.add_argument("--ncomp", help="Number of spectroscopic components in LSD profile", type=int, \
                                         default=Ncomp)
     parser.add_argument("--initRV", help="Initial value(s) of RV for selected components. Format: \
@@ -336,7 +341,7 @@ if __name__ == "__main__":
             if result:
                 print(f"File {filelist[f]} has been succesfully processed\n")
     else:
-        result = process_file(infile, args, logfile)
+        result = process_file(infile, args, logfile, 0.0)
         if result:
             print(f"File {infile} has been succesfully processed\n")
     exit(0)
