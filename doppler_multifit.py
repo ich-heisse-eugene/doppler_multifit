@@ -6,6 +6,9 @@ import numpy as np
 import numpy.ma as ma
 from lmfit import minimize, Parameters, fit_report, report_fit
 from scipy.interpolate import splrep, splev
+from scipy import signal
+from numpy.polynomial.legendre import legfit, legval
+from numpy.polynomial.chebyshev import chebfit, chebval
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib as mpl
@@ -207,6 +210,8 @@ def process_file(infile, args, logfile, bary):
     else:
         resol = args.resol
     obs_vel, obs_prof, obs_err = import_data(infile)
+    if args.renormalize:
+        obs_prof = renormalize_iraf(obs_vel, obs_prof, "chebyshev", 1, 7, 1.2, 6., 5)
     obs_vel += bary
     if args.plot == None:
         plotfile = infile + "_fit.pdf"
@@ -269,6 +274,61 @@ def process_file(infile, args, logfile, bary):
         plot_profile(obs_vel_full, obs_prof_full, obs_err_full, mask, diff, model_full, plotfile, args.batch)
     return True
 
+# Mean LSD profile re-normalization block
+def filter_result(input_signal, window):
+	""" Function smooths input data using Savitsky-Golay filter
+	"""
+	return signal.savgol_filter(input_signal, window_length=window, polyorder=2, axis=0, mode='nearest')
+	# return input_signal
+
+def median_smooth(input_signal, npix):
+	""" This function performs smoothing of the input array using median filter
+	"""
+	return signal.medfilt(input_signal, npix)
+
+def fit_poly(w, r, type, order):
+    if type == "legendre":
+        coef = legfit(w, r, order)
+        return coef
+    elif type == "chebyshev":
+        coef = chebfit(w, r, order)
+        return coef
+
+def fit_cont(w, type, coef):
+    if type == "legendre":
+        return legval(w, coef)
+    elif type == "chebyshev":
+        return chebval(w, coef)
+
+def reject_points(w, r, cont, low_rej, high_rej, func, ord):
+    resid = r - cont
+    stdr = np.std(resid)
+    idx = np.where((resid >= -low_rej * stdr) & (resid <= high_rej * stdr))
+    coef = fit_poly(w[idx], r[idx], func, ord)
+    return w[idx], r[idx], cont, coef
+
+def renormalize_iraf(w_init, r_init, fit_func, fit_ord, fit_niter, fit_low_rej, fit_high_rej, window):
+	r_0 = r_init.copy()
+	r_init = filter_result(r_0, window)
+	cont_lev = np.zeros(len(r_init))
+	if fit_niter <= 1:
+		fit_niter = fit_niter + 1
+	w_tmp = w_init
+	r_tmp = r_init
+	for j in range(fit_niter-1):
+		coef = fit_poly(w_tmp, r_tmp, fit_func, fit_ord)
+		cont = fit_cont(w_tmp, fit_func, coef)
+		w_tmp, r_tmp, cont, coef = reject_points(w_tmp, r_tmp, cont, fit_low_rej, fit_high_rej, fit_func, fit_ord)
+		cont_full = fit_cont(w_init, fit_func, coef)
+	cont_lev = cont_full
+	idx_wrong = np.where(cont_lev == 0.)[0]
+	cont_lev[idx_wrong] = r_init[idx_wrong]
+	plt.plot(w_init, r_init, 'k-')
+	plt.plot(w_init, cont_lev, 'r--')
+	plt.show()
+	return r_0/cont_lev
+# end of re-normalization
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -299,6 +359,7 @@ if __name__ == "__main__":
     parser.add_argument("--plot", help="Save plot to the output file [with extension]", type=str, default=None)
     parser.add_argument("--exclude", help="Regions to exclude in fitting. Format: RV01:RV02,RV11:RV12", \
                         default="", type=str)
+    parser.add_argument("--renormalize", help="Renormalizer profile before fitting?", action="store_true")
     parser.add_argument("--batch", help="Batch processing. An input file must contain a list of LSD profiles", action="store_true")
     parser.add_argument("--hastime", help="Batch processin. An input file must contain a column with time marks separated by semicolon from a list of LSD profiles", action="store_true")
     parser.add_argument("--bary", help="An input file contain a column with barycentric correction in km/s", action="store_true")
